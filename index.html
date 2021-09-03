@@ -1,0 +1,175 @@
+<html><body>
+
+<button onClick="listFiles()">Select Directory</button>
+
+<ul id="carList"></ul>
+
+<script type="text/javascript">
+  var carList = document.getElementById("carList");
+  var allAlloweds = [];
+  var fileHandles = {};
+  
+  async function addCar(carName, directoryHandle, entry) {
+
+    var configNumber = getConfigNumber(entry.name);
+    const fileHandle = await directoryHandle.getFileHandle(entry.name);
+    var alloweds = await readContents(carName + configNumber, fileHandle);
+    var listItem = addCarListItem(carName, configNumber);
+    
+    addAlloweds(carName + configNumber, listItem, alloweds);
+  }
+  
+  function addAlloweds(carName, listItem, alloweds) {
+    if(alloweds != null && alloweds.length > 0) {
+      alloweds.forEach(function(allowed) {
+        if(allowed.indexOf("Order") == 0) return;
+        
+        if(!allAlloweds.includes(allowed)) allAlloweds.push(allowed);
+      });
+      addCheckboxes(carName, listItem, alloweds);
+    }
+  }
+  
+  async function readContents(carName, fileHandle) {
+    const file = await fileHandle.getFile();
+    const contents = await file.text();
+    const lines = contents.split('\n');
+    if(lines.length > 0) {
+      for(var lineNumber in lines) {
+        var line = lines[lineNumber];
+        if(line.indexOf("allowedPlaces") == 0) {
+          var allowed = line.split("=")[1];
+          // console.log(`${carName} allowed in ${allowed}`);
+          
+          var allowedItems = allowed.split(",");
+          
+          fileHandles[carName] = {
+            "handle": fileHandle,
+            "contents": contents,
+            "currentAllowedLine": line,
+            "allowedOrders": getAllowedOrders(allowedItems)
+          };
+          
+          return allowedItems;
+        }
+      }
+    }
+  }
+  
+  function getAllowedOrders(allowedItems) {
+    var allowedOrders = [];
+    for(var index in allowedItems) {
+      var item = allowedItems[index];
+      if(item.indexOf("Order") == 0) allowedOrders.push(item);
+    }
+    
+    return allowedOrders;
+  }
+                                        
+  function addCarListItem(name, configNumber) {    
+    if(configNumber == null) configNumber = "";
+    const item = document.createElement("li");
+    item.innerHTML = `${name}${configNumber} <br />`;
+    carList.appendChild(item);
+    
+    return item;
+  }
+  
+  function addCheckboxes(carName, node, alloweds) {
+    ["Auction", "Salon", "Junkyard", "Shed"].forEach(function(place) {
+      var isAllowed = alloweds.includes(place);
+      addCheckBox(carName, node, place, isAllowed);
+    });
+  }
+  
+  function addCheckBox(carName, node, text, isChecked) {
+    const check = document.createElement("input");
+    const label = document.createElement("label");
+    check.addEventListener("change", allowedChecked);
+    check.id = carName + '_' + text;
+    label.innerHTML = text;
+    label.for = check.id;
+    check.type = "checkbox";
+    check.checked = isChecked;
+    node.appendChild(check);   
+    node.appendChild(label);    
+  }
+  
+  async function allowedChecked(event) {
+    // console.log(event);
+    var checkbox = event.srcElement;
+    var id = checkbox.id;
+    var checked = checkbox.checked;
+    // console.log(`Checkbox ${id} checked: ${checked}`);
+    
+    var carName = id.split('_')[0];
+    var fileHandle = fileHandles[carName];
+    // console.log(fileHandle);
+    
+    // var newAllowed = fileHandle["allowedOrders"];
+    // var newContents = fileHandle["contents"].replace(
+    var newContents = getNewContents(carName, fileHandle);
+    fileHandle.contents = newContents;
+    await writeFile(fileHandle.handle, newContents);
+  }
+  
+  function getNewAlloweds(carName, fileHandle) {
+    var alloweds = [];
+    for(var index in fileHandle["allowedOrders"]) {
+      alloweds.push(fileHandle["allowedOrders"][index]);
+    }
+    for(var index in allAlloweds) {
+      var allowed = allAlloweds[index];
+      var checkbox = document.getElementById(carName + "_" + allowed);
+      if(checkbox.checked) alloweds.push(allowed);
+    }
+    
+    return alloweds;
+  }
+  
+  function getNewContents(carName, fileHandle) {
+    
+    var newAlloweds = getNewAlloweds(carName, fileHandle);
+    console.log(newAlloweds);
+    var newAllowedLine = "allowedPlaces=" + newAlloweds.join(",");
+    
+    var newContents = fileHandle["contents"].replace(fileHandle["currentAllowedLine"], newAllowedLine);
+    fileHandle["currentAllowedLine"] = newAllowedLine;
+    
+    return newContents;
+  }
+  
+  function getConfigNumber(name) {
+    
+    if(name.indexOf("config") != 0) return null;
+    return name.replace("config", "").replace(".txt", "");
+  }
+  
+  async function writeFile(fileHandle, contents) {
+    const writable = await fileHandle.createWritable();
+    var result1 = await writable.write(contents);
+    var result2 = await writable.close();
+    
+    console.log(`Success? ${result1} ${result2}`);
+  }
+  
+  async function listFiles() {
+      const dirHandle = await window.showDirectoryPicker();
+      for await (const entry of dirHandle.values()) {
+        if(entry.kind == "directory") {
+          var configCount = 0;
+          var subDir = await dirHandle.getDirectoryHandle(entry.name);
+          for await (const subEntry of subDir.values()) {
+            if(subEntry.name.indexOf("config") == 0) await addCar(entry.name, subDir, subEntry);
+          }
+        }
+      }
+    
+    console.log(allAlloweds);
+    console.log(fileHandles);
+  }
+  
+  listFiles();
+</script>
+
+  </body></html>
